@@ -224,15 +224,19 @@ def main():
         json.dump([{**p, "date": p["date"].strftime("%Y-%m-%d")} for p in pts],
                   open(pts_path, "w"))
     pts = fetch_rain(pts)
-    rows = []
+    rows, series = [], []
     for p in pts:
         pr = p.pop("precip")
         if pr is None or len(pr) != WINDOW_DAYS or sum(v is None for v in pr) > 2:
             continue
         rows.append({**p, "date": p["date"].strftime("%Y-%m-%d"), **rain_features(pr)})
+        series.append([p["id"]] + [0.0 if v is None else v for v in pr])
     df = pd.DataFrame(rows)
     out = os.path.join(DATA, "dataset.csv")
     df.to_csv(out, index=False)
+    # the daily series themselves, used by the slope-stability model in train.py
+    pd.DataFrame(series, columns=["id"] + [f"p{i:02d}" for i in range(WINDOW_DAYS)]).to_csv(
+        os.path.join(DATA, "precip_30d.csv"), index=False)
     print(f"wrote {out}: {len(df)} rows\n{df.kind.value_counts()}")
 
 
