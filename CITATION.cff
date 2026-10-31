@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software or its results, please cite it as below."
+title: "SlopeWatch: explainable early warning of rainfall-triggered landslides from open global data"
+type: software
+authors:
+  - family-names: "Ray"
+    given-names: "Swapnil"
+    # orcid: "https://orcid.org/0000-0000-0000-0000"
+version: 1.0.0
+date-released: 2026-09-29
+license: MIT
+repository-code: "https://github.com/Swapnil11801/landslide-early-warning"
+keywords: [landslides, early warning, natural hazards, machine learning, explainable AI, rainfall thresholds]

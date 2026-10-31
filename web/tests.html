@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SlopeWatch Parity Tests</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>body { padding: 16px; overflow-y: auto; } .ok { color: var(--risk-0); } .bad { color: var(--risk-3); }</style>
+</head>
+<body>
+  <h1>Browser ↔ Python parity</h1>
+  <p class="muted">Checks that terrain features computed in this browser match those used to train the model (research/src/terrain.py).</p>
+  <div class="table-wrap"><table id="t"><thead><tr><th>Point</th><th>Feature</th><th class="num">Python</th><th class="num">Browser</th><th>Result</th></tr></thead><tbody></tbody></table></div>
+  <p id="summary"></p>
+  <script type="module">
+    import { terrainFeatures } from "./js/terrain.js";
+    const ref = await (await fetch("model/parity.json")).json();
+    const tb = document.querySelector("tbody");
+    let fails = 0, n = 0;
+    for (const p of ref) {
+      const got = await terrainFeatures(p.lat, p.lon);
+      for (const [k, v] of Object.entries(p.terrain)) {
+        const ok = Math.abs(got[k] - v) < 1e-6 * Math.max(1, Math.abs(v));
+        n++; if (!ok) fails++;
+        tb.insertAdjacentHTML("beforeend", `<tr><td>${p.name}</td><td>${k}</td><td class="num">${v.toFixed(4)}</td><td class="num">${got[k].toFixed(4)}</td><td class="${ok ? "ok" : "bad"}">${ok ? "✓" : "✕"}</td></tr>`);
+      }
+    }
+    document.getElementById("summary").innerHTML = fails ? `<b class="bad">${fails}/${n} mismatches</b>` : `<b class="ok">All ${n} checks passed</b>`;
+    document.title = fails ? "FAIL" : "PASS";
+  </script>
+</body>
+</html>

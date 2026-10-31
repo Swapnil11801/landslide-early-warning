@@ -1,0 +1,74 @@
+[
+ {
+  "name": "Kathmandu rim",
+  "lat": 27.75,
+  "lon": 85.45,
+  "terrain": {
+   "elev": 1434.0,
+   "slope": 3.6777930100761327,
+   "slope_mean_1km": 12.754500195310397,
+   "slope_p90_1km": 23.452841095262265,
+   "relief_2km": 627.0
+  }
+ },
+ {
+  "name": "Kansas plains",
+  "lat": 38.5,
+  "lon": -98.5,
+  "terrain": {
+   "elev": 544.0390625,
+   "slope": 0.2420728704049603,
+   "slope_mean_1km": 0.4449397699726838,
+   "slope_p90_1km": 0.9974044874525314,
+   "relief_2km": 14.9296875
+  }
+ },
+ {
+  "name": "Wayanad",
+  "lat": 11.468,
+  "lon": 76.14,
+  "terrain": {
+   "elev": 1342.0,
+   "slope": 30.30233161710639,
+   "slope_mean_1km": 27.132908261701978,
+   "slope_p90_1km": 37.269327300258034,
+   "relief_2km": 1248.0
+  }
+ },
+ {
+  "name": "Oso",
+  "lat": 48.282,
+  "lon": -121.85,
+  "terrain": {
+   "elev": 144.8203125,
+   "slope": 15.463554559347857,
+   "slope_mean_1km": 8.20474442822083,
+   "slope_p90_1km": 17.77838465910251,
+   "relief_2km": 235.3203125
+  }
+ },
+ {
+  "name": "Tile corner (Alps)",
+  "lat": 46.0,
+  "lon": 7.73,
+  "terrain": {
+   "elev": 1856.31640625,
+   "slope": 8.180096151896215,
+   "slope_mean_1km": 23.42368767148167,
+   "slope_p90_1km": 39.28091998414137,
+   "relief_2km": 1009.37890625
+  }
+ },
+ {
+  "name": "Southern Andes",
+  "lat": -41.1,
+  "lon": -71.5,
+  "terrain": {
+   "elev": 770.8203125,
+   "slope": 5.283944911235867,
+   "slope_mean_1km": 14.081513328177913,
+   "slope_p90_1km": 33.549118802494405,
+   "relief_2km": 851.5
+  }
+ }
+]

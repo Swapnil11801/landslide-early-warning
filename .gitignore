@@ -1,0 +1,11 @@
+# raw / cached downloads (reproducible with research/src/build_dataset.py)
+research/data/glc.csv
+research/data/tiles/
+research/data/rain_cache.jsonl
+research/data/points.json
+research/data/*.log
+__pycache__/
+.venv/
+.DS_Store
+Thumbs.db
+PRESENTING.md
