@@ -41,7 +41,7 @@ The full methods, results and limitations are on the [Research page](web/researc
 ## Repository layout
 
 ```
-web/                  static web app (published to the gh-pages branch)
+web/                  static web app (GitHub Pages serves this folder)
   js/terrain.js       slope/relief from elevation tiles; mirrors research/src/terrain.py
   js/model.js         tree-ensemble inference + per-feature attributions
   js/weather.js       Open-Meteo rainfall + geocoding
@@ -66,11 +66,8 @@ python -m http.server -d web 8000      # then open http://localhost:8000
 
 ## Deploy
 
-The live site is served by GitHub Pages from the `gh-pages` branch, which mirrors the `web/` folder:
-
-```bash
-git subtree split --prefix web -b gh-pages && git push -f origin gh-pages
-```
+Every push to `main` that touches `web/` is deployed to GitHub Pages automatically by
+`.github/workflows/pages.yml`.
 
 ## Data sources and credits
 
