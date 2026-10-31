@@ -9,15 +9,25 @@
 </head>
 <body>
   <h1>Browser ↔ Python parity</h1>
-  <p class="muted">Checks that terrain features computed in this browser match those used to train the model (research/src/terrain.py).</p>
+  <p class="muted">Checks that terrain features and slope-stability results computed in this browser match the Python research code (research/src/terrain.py, slope_stability.py).</p>
   <div class="table-wrap"><table id="t"><thead><tr><th>Point</th><th>Feature</th><th class="num">Python</th><th class="num">Browser</th><th>Result</th></tr></thead><tbody></tbody></table></div>
   <p id="summary"></p>
   <script type="module">
     import { terrainFeatures } from "./js/terrain.js";
+    import { loadStability, stability } from "./js/stability.js";
     const ref = await (await fetch("model/parity.json")).json();
     const tb = document.querySelector("tbody");
     let fails = 0, n = 0;
-    for (const p of ref) {
+    await loadStability();
+    for (const c of ref.stability) {
+      const got = stability(c.beta, c.precip);
+      for (const [k, v] of Object.entries(c.result)) {
+        const ok = Math.abs(got[k] - v) < 1e-9 * Math.max(1, Math.abs(v));
+        n++; if (!ok) fails++;
+        tb.insertAdjacentHTML("beforeend", `<tr><td>Stability: ${c.name}</td><td>${k}</td><td class="num">${v.toFixed(4)}</td><td class="num">${got[k].toFixed(4)}</td><td class="${ok ? "ok" : "bad"}">${ok ? "✓" : "✕"}</td></tr>`);
+      }
+    }
+    for (const p of ref.terrain) {
       const got = await terrainFeatures(p.lat, p.lon);
       for (const [k, v] of Object.entries(p.terrain)) {
         const ok = Math.abs(got[k] - v) < 1e-6 * Math.max(1, Math.abs(v));

@@ -1,6 +1,7 @@
 import { terrainFeatures } from "./terrain.js";
 import { rainSeries, rainSeriesMany, geocode } from "./weather.js";
 import { loadModel, predict, rainFeatures, band, BANDS, getModel } from "./model.js";
+import { loadStability, stability, getStability } from "./stability.js";
 
 const REPO_URL = "https://github.com/Swapnil11801/landslide-early-warning";
 document.getElementById("gh-link").href = REPO_URL;
@@ -98,8 +99,8 @@ function haversine(a, b, c, d) {
 }
 
 // ------------------------------------------------------------------ state
-const state = { lat: null, lon: null, name: null, terrain: null, series: null, sel: null, extra: 0 };
-const modelReady = loadModel();
+const state = { lat: null, lon: null, name: null, terrain: null, series: null, sel: null, extra: 0, soil: null };
+const modelReady = Promise.all([loadModel(), loadStability()]);
 
 function intro() {
   content.innerHTML = `
@@ -236,6 +237,8 @@ function render() {
       ${threshold()}</div>
     </section>
 
+    <section class="card" id="stab"></section>
+
     <section class="card">
       <h3>Terrain <small>Copernicus/SRTM elevation via AWS Terrain Tiles</small></h3>
       <div class="stats">
@@ -257,6 +260,7 @@ function render() {
 
   $("#reset").onclick = () => { if (marker) marker.remove(); state.series = null; intro(); };
   content.querySelectorAll(".strip button").forEach((b) => (b.onclick = () => { state.sel = +b.dataset.i; state.extra = 0; render(); }));
+  renderStability();
   const slider = $("#extra");
   slider.oninput = () => {
     state.extra = +slider.value;
@@ -265,6 +269,69 @@ function render() {
     $("#extra").focus();
     content.scrollTop = keep;
   };
+}
+
+// ------------------------------------------------------- slope stability
+const SOIL = [
+  { k: "c", label: "Effective cohesion c′", unit: " kPa", min: 0, max: 20, step: 0.5 },
+  { k: "phi", label: "Friction angle φ′", unit: "°", min: 20, max: 45, step: 1 },
+  { k: "z", label: "Soil depth to slip surface z", unit: " m", min: 0.5, max: 3, step: 0.1 },
+];
+
+function stabDay(i, extra = 0) {
+  const p = state.series.precip.slice(i - 29, i + 1).map((v) => v ?? 0);
+  if (extra) p[p.length - 1] += extra;
+  return stability(state.terrain.slope_p90_1km, p, state.soil);
+}
+
+function renderStability() {
+  const S = getStability(), T = state.series.todayIndex;
+  state.soil ??= { c: S.deterministic.c, phi: S.deterministic.phi, z: S.deterministic.z };
+  const cur = stabDay(state.sel, state.extra);
+  const days = [];
+  for (let i = T - 7; i <= T + 6; i++) days.push({ i, ...stabDay(i, i === state.sel ? state.extra : 0) });
+  const col = cur.fs < 1 ? "var(--risk-3)" : cur.fs < 1.3 ? "var(--risk-2)" : cur.fs < 1.5 ? "var(--risk-1)" : "var(--risk-0)";
+  const verdict = cur.fs < 1 ? "Unstable (FS < 1)" : cur.fs < 1.3 ? "Marginally stable" : cur.fs < 1.5 ? "Stable, low margin" : "Stable";
+  $("#stab").innerHTML = `
+    <h3>Slope stability <small>infinite-slope model · geomechanics</small></h3>
+    <div class="risk-hero">
+      <div style="text-align:center;min-width:96px"><div class="tiny">Factor of safety</div>
+        <div style="font:600 34px/1.1 var(--serif);color:${col}">${fmt(cur.fs, 2)}</div></div>
+      <div><div class="label" style="font-size:19px;color:${col}">${verdict}</div>
+        <div class="sub">Water table at <b>${Math.round(cur.wetness * 100)}%</b> of soil depth. Over 400 plausible soils,
+        <b>${Math.round(cur.pf * 100)}%</b> would fail on this slope today: P(FS&nbsp;&lt;&nbsp;1).</div></div>
+    </div>
+    ${fsChart(days, T)}
+    <div class="whatif" style="margin-top:8px">
+      ${SOIL.map((p) => `<div class="row"><span>${p.label}</span><b>${fmt(state.soil[p.k], p.step < 1 ? 1 : 0)}${p.unit}</b></div>
+        <input type="range" data-soil="${p.k}" min="${p.min}" max="${p.max}" step="${p.step}" value="${state.soil[p.k]}" aria-label="${p.label}">`).join("")}
+      <button class="chip" id="soil-reset" style="margin-top:4px">Reset to typical soil</button>
+    </div>
+    <p class="tiny" style="margin:8px 0 0">FS = c′/(γ z sin β cos β) + (1 − m γ<sub>w</sub>/γ) tan φ′ / tan β, using the steepest 10% of slopes within 1 km
+    (β = ${fmt(state.terrain.slope_p90_1km, 1)}°) and a water table m fed by the last 30 days of rain. The soil properties are textbook values, not site measurements.
+    Validation shows this model needs local soil data to be predictive. The <a href="research.html#s4">Research</a> page explains why.</p>`;
+  $("#stab").querySelectorAll("input[data-soil]").forEach((el) => (el.oninput = () => {
+    state.soil[el.dataset.soil] = +el.value;
+    renderStability();
+    $(`#stab input[data-soil="${el.dataset.soil}"]`).focus();
+  }));
+  $("#soil-reset").onclick = () => { state.soil = null; renderStability(); };
+}
+
+function fsChart(days, T) {
+  const W = 380, H = 96, pad = 26, n = days.length, bw = (W - pad) / n;
+  const max = Math.max(2, ...days.map((d) => Math.min(d.fs, 4)));
+  const y = (v) => 6 + (1 - Math.min(v, max) / max) * (H - 24);
+  const pts = days.map((d, k) => `${pad + k * bw + bw / 2},${y(d.fs)}`).join(" ");
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;margin-top:8px" role="img" aria-label="Factor of safety over 14 days">
+    <rect x="${pad}" y="${y(1)}" width="${W - pad}" height="${H - 18 - y(1)}" fill="var(--risk-3)" opacity=".1"/>
+    <line x1="${pad}" x2="${W}" y1="${y(1)}" y2="${y(1)}" stroke="var(--risk-3)" stroke-dasharray="3 3"/>
+    <text x="${pad - 4}" y="${y(1) + 3}" text-anchor="end" font-size="10" fill="var(--ink-3)">1.0</text>
+    <text x="${pad - 4}" y="${y(max) + 6}" text-anchor="end" font-size="10" fill="var(--ink-3)">${fmt(max, 1)}</text>
+    <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+    ${days.map((d, k) => `<circle cx="${pad + k * bw + bw / 2}" cy="${y(d.fs)}" r="${d.i === state.sel ? 4 : 2.2}" fill="${d.i > T ? "var(--surface)" : "var(--accent)"}" stroke="var(--accent)"><title>FS ${fmt(d.fs, 2)}, P(fail) ${Math.round(d.pf * 100)}%</title></circle>`).join("")}
+    <text x="${pad + (T - days[0].i) * bw + bw / 2}" y="${H - 4}" text-anchor="middle" font-size="10" fill="var(--ink-3)">today</text>
+    <text x="${W}" y="${H - 4}" text-anchor="end" font-size="10" fill="var(--ink-3)">FS = 1 means failure</text></svg>`;
 }
 
 function summary(cur, t) {

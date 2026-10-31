@@ -26,6 +26,9 @@ const gz = R.metrics["Guzzetti 2008 rainfall threshold"];
 const nPos = R.n.landslide, nNeg = (R.n.temporal_control ?? 0) + (R.n.spatial_control ?? 0);
 const bin = R.binary;
 const ours = bin["This model (p ≥ 0.5)"], guz = bin["Guzzetti 2008 (exceeded)"];
+const P = R.physics;
+const ci = (m) => `${f2(m.roc_auc_ci[0])}–${f2(m.roc_auc_ci[1])}`;
+const wet = R.metrics["Infinite slope: soil wetness only"], pfm = R.metrics["Infinite slope: probability of failure"];
 const topImp = R.importance.slice(0, 3).map((d) => d.label.replace(/ \(.*\)/, "").toLowerCase());
 
 function draw() {
@@ -48,11 +51,15 @@ function draw() {
     ${R.date_range[0].slice(0, 4)}–${R.date_range[1].slice(0, 4)}) with ${nNeg.toLocaleString()} matched controls. For each case we
     derived five terrain descriptors from a global elevation model and five antecedent-rainfall descriptors
     from ERA5 reanalysis. Under 5-fold <i>spatial</i> cross-validation, where every test region is unseen
-    during training, a gradient-boosted tree model reached a ROC-AUC of <b>${f2(main.roc_auc)}</b>. The widely used
-    global rainfall intensity–duration threshold of Guzzetti et al. (2008) reached ${f2(gz.roc_auc)}.
+    during training, a gradient-boosted tree model reached a ROC-AUC of <b>${f2(main.roc_auc)}</b> (95% CI ${ci(main)}). The widely used
+    global rainfall intensity–duration threshold of Guzzetti et al. (2008) reached ${f2(gz.roc_auc)} (${ci(gz)}), a statistically
+    significant difference.
     Most of that gain comes from ranking the highest-risk cases better. At the threshold's own false-alarm rate,
     the two methods detect a similar share of landslides (${pct(R.matched.at_guzzetti_false_alarm_rate.hit_rate)} vs ${pct(guz.hit_rate)}).
-    The most informative predictors on held-out regions were ${topImp.join(", ")}. The model runs entirely in a web browser,
+    The most informative predictors on held-out regions were ${topImp.join(", ")}. We also tested a physically based
+    infinite-slope stability model with Monte Carlo reliability analysis. Its rainfall-driven water table alone matched the
+    empirical threshold (AUC ${f2(wet.roc_auc)}), but its probability of failure was barely better than chance (${f2(pfm.roc_auc)}).
+    Our diagnosis is that global elevation data underestimate slope angles and that cohesion is unknown at global scale. The model runs entirely in a web browser,
     scores any point on Earth using live rainfall forecasts and explains each prediction.
   </p></section>
 
@@ -73,7 +80,8 @@ function draw() {
   specialised infrastructure.</p>
   <p>This project asks three questions. <b>(Q1)</b> How well can openly available global data discriminate
   landslide occurrence in space <i>and</i> time? <b>(Q2)</b> How much do terrain and antecedent rainfall
-  each contribute? <b>(Q3)</b> Can such a model be delivered as a transparent, zero-install tool that
+  each contribute? <b>(Q3)</b> Does a physically based slope-stability model add anything to a data-driven one?
+  <b>(Q4)</b> Can such a model be delivered as a transparent, zero-install tool that
   anyone can audit?</p>
 
   <h2 id="s2">2 · Data</h2>
@@ -111,16 +119,33 @@ function draw() {
   through every tree and attributing each change in expected value to the splitting feature (Saabas, 2014).
   The contributions sum exactly to the model's log-odds output. This is what the "Why this score?" panel in
   the app shows.</p>
+  <p><b>Physically based slope stability.</b> As a mechanistic counterpart to the data-driven model, we computed the
+  infinite-slope factor of safety (Skempton &amp; DeLory, 1957; Montgomery &amp; Dietrich, 1994) for a planar slip surface
+  at depth <i>z</i>, parallel to a slope of angle β, with seepage parallel to the slope:</p>
+  <p style="text-align:center;font-family:var(--serif)"><i>FS</i> = <i>c′</i> / (γ <i>z</i> sin β cos β) + (1 − <i>m</i> γ<sub>w</sub>/γ) tan φ′ / tan β</p>
+  <p>Here <i>c′</i> is effective cohesion (including root cohesion), φ′ the effective friction angle, γ the soil unit weight
+  and <i>m</i> the height of the water table as a fraction of <i>z</i>. Rainfall raises the water table through a linear
+  reservoir with a ${P.tau_days}-day drainage time constant, a simplification of transient infiltration (Iverson, 2000):
+  the stored water is <i>S</i> = Σ <i>P</i><sub>t−i</sub> e<sup>−i/τ</sup> and <i>m</i> = min(1, <i>S</i> / (<i>n</i><sub>d</sub> <i>z</i>)), where
+  <i>n</i><sub>d</sub> is the drainable porosity. Slope angle β is the steepest 10% of slopes within 1 km, which is the failure-prone part of the
+  neighbourhood. Soil properties are not known at global scale, so instead of a single deterministic value we performed a
+  <b>reliability analysis</b> (Griffiths &amp; Fenton, 2004). We drew 400 parameter sets from textbook ranges for shallow
+  hillslope soils, <i>c′</i> ~ U(1, 10) kPa, φ′ ~ N(32°, 4°), <i>z</i> ~ U(0.5, 2.5) m, γ ~ N(19, 1) kN/m³ and <i>n</i><sub>d</sub> ~ U(0.1, 0.3),
+  and report the probability of failure <i>P</i><sub>f</sub> = P(<i>FS</i> &lt; 1). All parameters were fixed <i>a priori</i>; none
+  were fitted to the landslide data.</p>
+  <p><b>Uncertainty.</b> 95% confidence intervals come from a cluster bootstrap (Efron &amp; Tibshirani, 1993) with 1,000
+  replicates that resample whole 5° cells, so the intervals respect spatial dependence. Differences between models are
+  tested in the same way: a difference is called significant when its interval excludes zero.</p>
   <p><b>Deployment.</b> The trained trees are exported to JSON and evaluated in JavaScript. Terrain features are
-  recomputed in the browser from the same tiles, and an automated parity test confirms they match the training
-  pipeline to within 10<sup>−6</sup> (<a href="tests.html">run it here</a>). Live rainfall for the past 40 days and
+  recomputed in the browser from the same tiles, and the slope-stability model is re-implemented in JavaScript
+  with the same Monte Carlo draws. An automated parity test confirms that both match the research code to within 10<sup>−6</sup> (<a href="tests.html">run it here</a>). Live rainfall for the past 40 days and
   the next 7 comes from Open-Meteo's forecast API.</p>
 
   <h2 id="s4">4 · Results</h2>
   <h3>4.1 Discrimination</h3>
   <div class="table-wrap"><table>
-    <thead><tr><th>Model</th><th class="num">ROC-AUC</th><th class="num">PR-AUC</th><th class="num">AUC vs temporal controls</th><th class="num">AUC vs spatial controls</th></tr></thead>
-    <tbody>${Object.entries(R.metrics).map(([k, m]) => `<tr class="${k === MAIN ? "best" : ""}"><td>${k}</td><td class="num">${f2(m.roc_auc)}</td><td class="num">${f2(m.pr_auc)}</td><td class="num">${f2(m.auc_vs_temporal)}</td><td class="num">${f2(m.auc_vs_spatial)}</td></tr>`).join("")}</tbody>
+    <thead><tr><th>Model</th><th class="num">ROC-AUC (95% CI)</th><th class="num">PR-AUC</th><th class="num">AUC vs temporal controls</th><th class="num">AUC vs spatial controls</th></tr></thead>
+    <tbody>${Object.entries(R.metrics).map(([k, m]) => `<tr class="${k === MAIN ? "best" : ""}"><td>${k}</td><td class="num">${f2(m.roc_auc)} <span class="tiny">(${ci(m)})</span></td><td class="num">${f2(m.pr_auc)}</td><td class="num">${f2(m.auc_vs_temporal)}</td><td class="num">${f2(m.auc_vs_spatial)}</td></tr>`).join("")}</tbody>
   </table></div>
   <p class="tiny">All values are out-of-fold under 5-fold spatial cross-validation. PR-AUC baseline (chance) = ${f2(nPos / (nPos + nNeg))}.</p>
   <figure>${rocSvg()}<figcaption><b>Figure 1.</b> ROC curves under spatial cross-validation. The dotted line marks chance.</figcaption></figure>
@@ -133,7 +158,32 @@ function draw() {
   3- and 7-day rainfall. Slope at the exact catalogue point mattered less than neighbourhood slope. This is consistent
   with catalogue positions being uncertain by up to 5 km.</p>
 
-  <h3>4.3 As a warning rule</h3>
+  <h3>4.3 Physically based slope stability</h3>
+  <figure>${pfSvg()}<figcaption><b>Figure 3.</b> Probability of failure P(FS &lt; 1) versus slope angle over the 400 sampled soils, for
+  three water-table states. The shaded band is the interquartile range of slope angles at real landslide sites, as measured on the elevation model.</figcaption></figure>
+  <p>The mechanics behave as expected. Gentle slopes remain stable even when saturated, while steep slopes approach failure as
+  the water table rises (Figure 3). The model's <b>hydrological</b> component is informative. The soil-wetness index alone
+  separates landslide days from dry days at the same place with AUC ${f2(wet.auc_vs_temporal)}, the best score on that task of any
+  method in this study, and it matches the Guzzetti threshold overall (${f2(wet.roc_auc)} vs ${f2(gz.roc_auc)}). The full
+  <b>probability of failure</b>, however, is barely better than chance (AUC ${f2(pfm.roc_auc)}, CI ${ci(pfm)}).</p>
+  <p>Two causes explain this. First, <b>slope angles are underestimated</b>. On the ~76 m elevation model, the steepest 10% of
+  slopes at real landslide sites have a median of only ${P.landslide_slope_median}° (IQR ${P.landslide_slope_iqr[0]}–${P.landslide_slope_iqr[1]}°),
+  whereas shallow landslides typically occur on slopes of 25–45°. Coarse grids smooth out the steep scarps where failures
+  start, so the model predicts FS &lt; 1 for only ${pct(P.share_landslides_fs_below_1)} of real landslides
+  (and ${pct(P.share_controls_fs_below_1)} of controls). Second, <b>the result is dominated by unknown soil strength</b>. A
+  sensitivity analysis on a representative steep, wet slope shows that FS depends most on cohesion:</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Soil parameter</th><th class="num">Rank correlation with FS</th></tr></thead>
+    <tbody>${P.sensitivity.map((d) => `<tr><td>${{ c: "Effective cohesion c′", z: "Depth of slip surface z", phi: "Friction angle φ′", nd: "Drainable porosity n<sub>d</sub>", gamma: "Unit weight γ" }[d.param]}</td><td class="num">${d.rho > 0 ? "+" : ""}${d.rho.toFixed(2)}</td></tr>`).join("")}</tbody>
+  </table></div>
+  <p class="tiny">Spearman correlation between each sampled parameter and FS for β = 35° and 150 mm of stored water.</p>
+  <p>Cohesion, especially root cohesion, varies by an order of magnitude over short distances and cannot be mapped globally. Finally,
+  giving the machine-learning model the physics outputs did not improve it (${Object.entries(P.hybrid).map(([k, m]) => `${k}: AUC ${f2(m.roc_auc)}`).join("; ")}),
+  because the physics is computed from the same terrain and rainfall inputs. The lesson is that physically based models need
+  <i>local</i> geotechnical data (high-resolution elevation, soil depth, strength from laboratory tests or back-analysis) to beat
+  data-driven models. At global scale, their main value is explaining <i>why</i> a slope is at risk.</p>
+
+  <h3>4.4 As a warning rule</h3>
   <div class="table-wrap"><table>
     <thead><tr><th>Rule</th><th class="num">Hit rate</th><th class="num">False-alarm rate</th><th class="num">Precision</th></tr></thead>
     <tbody>${Object.entries(bin).map(([k, b]) => `<tr><td>${k}</td><td class="num">${pct(b.hit_rate)}</td><td class="num">${pct(b.false_alarm_rate)}</td><td class="num">${pct(b.precision)}</td></tr>`).join("")}</tbody>
@@ -164,6 +214,8 @@ function draw() {
     <li><b>Coarse rainfall.</b> ERA5 (~25–30 km) smooths out convective cloudbursts that often trigger debris flows.</li>
     <li><b>Training/deployment mismatch.</b> The model was trained on ERA5 reanalysis, but the app uses forecast-model
       rainfall. Systematic differences between the two may shift scores.</li>
+    <li><b>Physics parameters.</b> The slope-stability model uses textbook soil properties and a simple linear-reservoir
+      water table rather than site investigations or a full unsaturated-flow model.</li>
     <li><b>Missing predictors.</b> Lithology, soil depth, land cover, deforestation, road cuts and earthquakes are not included.</li>
     <li><b>Not operational.</b> This is a research prototype and must not replace official warnings.</li>
   </ul>
@@ -172,7 +224,9 @@ function draw() {
   <ul>
     <li>Hindcast case studies of major disasters, such as Wayanad (India, 2024) and Petrópolis (Brazil, 2022), to measure warning lead time.</li>
     <li>Add soil moisture (SMAP, ERA5-Land), lithology and land-cover predictors, and quantify each one's gain.</li>
-    <li>Compare with NASA LHASA and with a physically based infinite-slope factor-of-safety model.</li>
+    <li>Compare with NASA LHASA, the operational global system.</li>
+    <li>Run the slope-stability model with high-resolution elevation data (e.g. 1–5 m lidar) and local soil data, and back-analyse
+      the mobilised strength at known failures to calibrate c′ and φ′ regionally.</li>
     <li>Train regional models where dense inventories exist, and study transfer between regions.</li>
     <li>Calibrate probabilities to real-world base rates for operational thresholds.</li>
   </ul>
@@ -191,14 +245,19 @@ function draw() {
   <ul class="tiny" style="font-family:var(--sans)">
     <li>Brenning, A. (2012). Spatial cross-validation and bootstrap for the assessment of prediction rules in remote sensing. <i>IGARSS 2012</i>.</li>
     <li>Caine, N. (1980). The rainfall intensity–duration control of shallow landslides and debris flows. <i>Geografiska Annaler A</i>, 62, 23–27.</li>
+    <li>Efron, B., &amp; Tibshirani, R. J. (1993). <i>An Introduction to the Bootstrap</i>. Chapman &amp; Hall.</li>
     <li>Froude, M. J., &amp; Petley, D. N. (2018). Global fatal landslide occurrence from 2004 to 2016. <i>Natural Hazards and Earth System Sciences</i>, 18, 2161–2181.</li>
+    <li>Griffiths, D. V., &amp; Fenton, G. A. (2004). Probabilistic slope stability analysis by finite elements. <i>Journal of Geotechnical and Geoenvironmental Engineering</i>, 130(5), 507–518.</li>
     <li>Guzzetti, F., Peruccacci, S., Rossi, M., &amp; Stark, C. P. (2008). The rainfall intensity–duration control of shallow landslides and debris flows: an update. <i>Landslides</i>, 5, 3–17.</li>
     <li>Hersbach, H., et al. (2020). The ERA5 global reanalysis. <i>Quarterly Journal of the Royal Meteorological Society</i>, 146, 1999–2049.</li>
     <li>Horn, B. K. P. (1981). Hill shading and the reflectance map. <i>Proceedings of the IEEE</i>, 69, 14–47.</li>
+    <li>Iverson, R. M. (2000). Landslide triggering by rain infiltration. <i>Water Resources Research</i>, 36(7), 1897–1910.</li>
     <li>Kirschbaum, D. B., Adler, R., Hong, Y., Hill, S., &amp; Lerner-Lam, A. (2010). A global landslide catalog for hazard applications. <i>Natural Hazards</i>, 52, 561–575.</li>
     <li>Kirschbaum, D., Stanley, T., &amp; Zhou, Y. (2015). Spatial and temporal analysis of a global landslide catalog. <i>Geomorphology</i>, 249, 4–15.</li>
     <li>Kirschbaum, D., &amp; Stanley, T. (2018). Satellite-based assessment of rainfall-triggered landslide hazard for situational awareness. <i>Earth's Future</i>, 6, 505–523.</li>
+    <li>Montgomery, D. R., &amp; Dietrich, W. E. (1994). A physically based model for the topographic control on shallow landsliding. <i>Water Resources Research</i>, 30(4), 1153–1171.</li>
     <li>Saabas, A. (2014). Interpreting random forests. Blog post, datadive.net.</li>
+    <li>Skempton, A. W., &amp; DeLory, F. A. (1957). Stability of natural slopes in London Clay. <i>Proc. 4th Int. Conf. on Soil Mechanics and Foundation Engineering</i>, London, 2, 378–381.</li>
   </ul>`;
 }
 
@@ -214,7 +273,10 @@ function resultsText() {
     Two results are worth stating plainly. First, on the temporal task alone the simple Guzzetti threshold (${f2(gz.auc_vs_temporal)}) slightly
     <i>beats</i> every learned model, which suggests the physically motivated intensity–duration form captures rainfall timing well.
     Second, adding the Guzzetti exceedance ratio as an eleventh feature did not improve the model (+0.002 AUC), so we kept the simpler model.
-    Overall discrimination is moderate. An AUC of ${f2(main.roc_auc)} is useful for ranking risk but far from a perfect forecast. That is expected
+    The combined model's advantage over the Guzzetti threshold is statistically significant (difference in AUC, 95% CI
+    ${f2(gz.diff_vs_main_ci[0])} to ${f2(gz.diff_vs_main_ci[1])}), but its advantage over logistic regression is not
+    (${f2(R.metrics["Logistic regression (all features)"].diff_vs_main_ci[0])} to ${f2(R.metrics["Logistic regression (all features)"].diff_vs_main_ci[1])}),
+    so a simple, fully interpretable model does almost as well. Overall discrimination is moderate. An AUC of ${f2(main.roc_auc)} is useful for ranking risk but far from a perfect forecast. That is expected
     given coarse rainfall data and a noisy, news-based inventory (Section 5).`;
 }
 
@@ -235,6 +297,23 @@ function rocSvg() {
     ${lines}${leg}${ticks}
     <text x="${x(0.5)}" y="${H - 6}" text-anchor="middle" font-size="12" fill="${css("--ink-2")}">False-positive rate</text>
     <text transform="translate(12,${y(0.5)}) rotate(-90)" text-anchor="middle" font-size="12" fill="${css("--ink-2")}">True-positive rate</text></svg>`;
+}
+
+function pfSvg() {
+  const c = P.pf_vs_slope, W = 520, H = 300, p = 46, s0 = c.slopes[0], s1 = c.slopes[c.slopes.length - 1];
+  const x = (v) => p + ((v - s0) / (s1 - s0)) * (W - p - 14), y = (v) => H - 36 - v * (H - 52);
+  const cols = [css("--risk-0"), css("--risk-1"), css("--risk-3")];
+  const [q1, q3] = P.landslide_slope_iqr;
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:620px;display:block" role="img" aria-label="Probability of failure versus slope">
+    <rect x="${x(q1)}" y="16" width="${x(q3) - x(q1)}" height="${H - 52}" fill="${css("--ink-3")}" opacity=".13"/>
+    <text x="${(x(q1) + x(q3)) / 2}" y="28" text-anchor="middle" font-size="11" fill="${css("--ink-2")}">landslide sites (DEM)</text>
+    <line x1="${p}" x2="${W - 14}" y1="${y(0)}" y2="${y(0)}" stroke="${css("--line")}"/>
+    ${[0, 0.5, 1].map((v) => `<text x="${p - 8}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="${css("--ink-3")}">${v}</text>`).join("")}
+    ${[0, 10, 20, 30, 40, 50].map((v) => `<text x="${x(v)}" y="${H - 18}" text-anchor="middle" font-size="11" fill="${css("--ink-3")}">${v}°</text>`).join("")}
+    ${Object.entries(c.curves).map(([k, ys], i) => `<polyline fill="none" stroke="${cols[i]}" stroke-width="2.4" points="${ys.map((v, j) => `${x(c.slopes[j])},${y(v)}`).join(" ")}"/>
+      <g transform="translate(${p + 12},${44 + i * 18})"><rect width="12" height="3" y="-4" fill="${cols[i]}"/><text x="18" font-size="11" fill="${css("--ink-2")}">${k}</text></g>`).join("")}
+    <text x="${(p + W) / 2}" y="${H - 2}" text-anchor="middle" font-size="12" fill="${css("--ink-2")}">Slope angle</text>
+    <text transform="translate(12,${y(0.5)}) rotate(-90)" text-anchor="middle" font-size="12" fill="${css("--ink-2")}">P(FS &lt; 1)</text></svg>`;
 }
 
 function impSvg() {

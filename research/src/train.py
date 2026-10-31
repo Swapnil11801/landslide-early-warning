@@ -26,6 +26,8 @@ from sklearn.preprocessing import FunctionTransformer, StandardScaler  # noqa: E
 
 sys.path.insert(0, os.path.dirname(__file__))
 from features import FEATURES, LABELS, RAIN_FEATURES, TERRAIN_FEATURES  # noqa: E402
+import slope_stability as ss  # noqa: E402
+from scipy.stats import spearmanr  # noqa: E402
 
 HERE = os.path.dirname(__file__)
 ROOT = os.path.join(HERE, "..", "..")
@@ -81,6 +83,43 @@ def metrics(y, s, kind):
     return {k: round(float(v), 4) for k, v in out.items()}
 
 
+def bootstrap_auc(y, scores, groups, n=1000, seed=SEED):
+    """Cluster bootstrap over spatial blocks (whole 5-degree cells are resampled, so the
+    intervals respect spatial dependence). Returns 95% CIs for each score's ROC-AUC and for
+    the difference between the main model and each other score."""
+    rng = np.random.default_rng(seed)
+    ug = np.unique(groups)
+    idx_by_g = {g: np.flatnonzero(groups == g) for g in ug}
+    names = list(scores)
+    draws = {k: [] for k in names}
+    for _ in range(n):
+        idx = np.concatenate([idx_by_g[g] for g in rng.choice(ug, len(ug))])
+        if y[idx].min() == y[idx].max():
+            continue
+        for k in names:
+            draws[k].append(roc_auc_score(y[idx], scores[k][idx]))
+    main = np.array(draws[names[0]])
+    out = {}
+    for k in names:
+        d = np.array(draws[k])
+        diff = main - d
+        out[k] = {"ci": [round(float(np.percentile(d, 2.5)), 3), round(float(np.percentile(d, 97.5)), 3)],
+                  "diff_vs_main_ci": [round(float(np.percentile(diff, 2.5)), 3), round(float(np.percentile(diff, 97.5)), 3)]}
+    return out
+
+
+def physics(df):
+    """Infinite-slope stability for every case (see slope_stability.py)."""
+    P = pd.read_csv(os.path.join(DATA, "precip_30d.csv")).set_index("id").loc[df.id.astype(str)].values
+    smp = ss.sample_parameters()
+    beta = df.slope_p90_1km.values  # steepest 10% of cells: the failure-prone part of the neighbourhood
+    res = [ss.stability(b, p, smp) for b, p in zip(beta, P)]
+    out = pd.DataFrame(res, index=df.index)
+    out["fs_dry"] = [float(ss.factor_of_safety(b, 0.0, **ss.DETERMINISTIC)[0]) for b in beta]
+    out["dfs"] = out.fs_dry - out.fs
+    return out, smp
+
+
 # ---------------------------------------------------------------- export ---
 def export_tree(est, lr):
     t = est.tree_
@@ -126,6 +165,8 @@ def main():
     groups = spatial_groups(df)
     print(df.kind.value_counts().to_dict(), "groups:", len(set(groups)))
 
+    phys, smp = physics(df)
+    df = pd.concat([df, phys[["pf", "fs", "wetness", "dfs"]]], axis=1)
     scores = {
         "Gradient boosting (all features)": cross_validate(df, gbm, FEATURES, groups),
         "Logistic regression (all features)": cross_validate(df, logreg, FEATURES, groups),
@@ -133,10 +174,48 @@ def main():
         "Gradient boosting (terrain only)": cross_validate(df, gbm, TERRAIN_FEATURES, groups),
         "Guzzetti 2008 rainfall threshold": guzzetti_score(df),
         "Mean slope only": df.slope_mean_1km.values,
+        "Infinite slope: probability of failure": df.pf.values,
+        "Infinite slope: soil wetness only": df.wetness.values,
+        "Infinite slope: rain-induced drop in FS": df.dfs.values,
     }
     table = {name: metrics(y, s, kind) for name, s in scores.items()}
     for name, m in table.items():
         print(f"{name:40s} {m}")
+
+    ci = bootstrap_auc(y, scores, groups)
+    for name in table:
+        table[name]["roc_auc_ci"] = ci[name]["ci"]
+        table[name]["diff_vs_main_ci"] = ci[name]["diff_vs_main_ci"]
+    print({k: v["ci"] for k, v in ci.items()})
+
+    # physics-informed ML: does giving the trees the physics outputs add information?
+    hybrid = {}
+    for label, extra in (("+ P(FS<1) and FS", ["pf", "fs"]), ("+ soil wetness and drop in FS", ["wetness", "dfs"])):
+        hybrid[label] = metrics(y, cross_validate(df, gbm, FEATURES + extra, groups), kind)
+    print("hybrid", hybrid)
+
+    # physics diagnostics + sensitivity (rank correlation of each soil parameter with FS
+    # for a representative steep, wet slope: 35 degrees, 150 mm stored water)
+    fs35, _ = ss.factor_of_safety(35.0, 150.0, **smp)
+    sens = sorted(({"param": k, "rho": round(float(spearmanr(v, fs35)[0]), 3)} for k, v in smp.items()),
+                  key=lambda d: -abs(d["rho"]))
+    slopes = list(range(0, 51, 2))
+    curves_pf = {lab: [round(float(np.mean(ss.factor_of_safety(b, st, **smp)[0] < 1)), 4) for b in slopes]
+                 for lab, st in (("Dry soil", 0.0), ("Wet (75 mm stored)", 75.0), ("Saturated (300 mm stored)", 300.0))}
+    lsl = df[df.label == 1]
+    phys_res = {
+        "slope_input": "slope_p90_1km",
+        "landslide_slope_median": round(float(lsl.slope_p90_1km.median()), 1),
+        "landslide_slope_iqr": [round(float(lsl.slope_p90_1km.quantile(q)), 1) for q in (0.25, 0.75)],
+        "share_landslides_fs_below_1": round(float((lsl.fs < 1).mean()), 3),
+        "share_controls_fs_below_1": round(float((df[df.label == 0].fs < 1).mean()), 3),
+        "sensitivity": sens, "pf_vs_slope": {"slopes": slopes, "curves": curves_pf},
+        "priors": ss.PRIORS, "deterministic": ss.DETERMINISTIC, "tau_days": ss.TAU_DAYS,
+        "hybrid": hybrid,
+    }
+    json.dump({"priors": ss.PRIORS, "deterministic": ss.DETERMINISTIC, "tau_days": ss.TAU_DAYS,
+               "gamma_w": ss.GAMMA_W, "samples": {k: v.tolist() for k, v in smp.items()}},
+              open(os.path.join(WEB, "stability.json"), "w"), separators=(",", ":"))
 
     main_s = scores["Gradient boosting (all features)"]
     # Guzzetti threshold as a binary warning, for comparison with our banded output
@@ -203,7 +282,7 @@ def main():
         "n_spatial_groups": int(len(set(groups))),
         "top_countries": df[df.label == 1].country.value_counts().head(8).to_dict(),
         "metrics": table, "binary": binary, "matched": matched, "bands": bands, "roc": curves,
-        "importance": importance, "medians": desc.to_dict(),
+        "importance": importance, "medians": desc.to_dict(), "physics": phys_res,
         "date_range": [df.date.min(), df.date.max()],
     }
     json.dump(results, open(os.path.join(WEB, "results.json"), "w"), indent=1)
@@ -234,6 +313,14 @@ def main():
     ax.legend()
     fig.tight_layout()
     fig.savefig(os.path.join(FIG, "score_hist.png"), dpi=200)
+    fig, ax = plt.subplots(figsize=(5.5, 3.6))
+    for lab, ys in curves_pf.items():
+        ax.plot(slopes, ys, label=lab)
+    ax.axvspan(*phys_res["landslide_slope_iqr"], color="grey", alpha=0.15, label="Landslide sites (DEM slope, IQR)")
+    ax.set(xlabel="Slope angle (°)", ylabel="P(FS < 1)", title="Infinite-slope probability of failure")
+    ax.legend(fontsize=7)
+    fig.tight_layout()
+    fig.savefig(os.path.join(FIG, "physics.png"), dpi=200)
     print("done")
 
 
