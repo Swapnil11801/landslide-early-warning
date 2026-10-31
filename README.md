@@ -6,7 +6,8 @@
 It runs entirely in your browser.**
 
 🌍 **Live demo:** https://swapnil11801.github.io/landslide-early-warning/ &nbsp;·&nbsp;
-📄 **Research note:** [research.html](https://swapnil11801.github.io/landslide-early-warning/research.html)
+📄 **Research note:** [research.html](https://swapnil11801.github.io/landslide-early-warning/research.html) &nbsp;·&nbsp;
+📘 **User manual:** [docs/USER_MANUAL.md](docs/USER_MANUAL.md)
 
 ![ROC curves](research/figures/roc.png)
 
@@ -78,6 +79,7 @@ research/
   data/dataset.csv       the derived dataset (raw downloads are git-ignored)
   data/precip_30d.csv    the 30-day daily rainfall series behind each case
   figures/               figures for the paper
+docs/USER_MANUAL.md      how to use the app, read the results and reproduce the research
 ```
 
 ## Reproduce
