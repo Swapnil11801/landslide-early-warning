@@ -1,6 +1,8 @@
 # SlopeWatch: explainable landslide early warning
 
-**Click any point on Earth and get a 14-day, explainable risk outlook for rainfall-triggered landslides.
+[![Parity tests](https://github.com/Swapnil11801/landslide-early-warning/actions/workflows/tests.yml/badge.svg)](https://github.com/Swapnil11801/landslide-early-warning/actions/workflows/tests.yml)
+
+**Click any point on Earth and see an explainable landslide risk estimate for the past week and the 7-day forecast.
 It runs entirely in your browser.**
 
 🌍 **Live demo:** https://swapnil11801.github.io/landslide-early-warning/ &nbsp;·&nbsp;
@@ -48,6 +50,12 @@ Confidence intervals come from a cluster bootstrap over spatial blocks.
   threshold, but its probability of failure is close to chance. The model underestimates slope angles (median
   19.9° at landslide sites on the ~76 m DEM) and depends mainly on cohesion (rank correlation
   +0.81), which is unknown at global scale. Physically based models need local geotechnical data.
+- **Out-of-sample case studies.** Three disasters after the training period were hindcast by scoring every day of
+  2015–2024 at the affected place. Atami (Japan, 2021) was among the two highest-scoring days of the decade.
+  Wayanad (India, 2024) and Petrópolis (Brazil, 2022) were elevated (92nd and 89th percentile) but not exceptional,
+  because ERA5 rainfall misses intense local storms. Rainfall input is the main bottleneck.
+
+![Case studies](research/figures/case_studies.png)
 
 The full methods, results and limitations are on the [Research page](https://swapnil11801.github.io/landslide-early-warning/research.html).
 
@@ -60,10 +68,12 @@ web/                  static web app (GitHub Pages serves this folder)
   js/weather.js       Open-Meteo rainfall + geocoding
   js/stability.js     infinite-slope FS + Monte Carlo P(FS<1); mirrors research/src/slope_stability.py
   model/              exported model, results, parity reference values
-  tests.html          browser <-> Python parity tests for terrain and slope stability
+  tests.html          browser <-> Python parity tests (model, terrain, slope stability)
+  tests/              the same checks for CI: Node (parity.test.mjs) and headless Chrome
 research/
   src/build_dataset.py   case-control dataset from NASA GLC + terrain + ERA5 rainfall
   src/slope_stability.py infinite-slope stability, reliability and sensitivity analysis
+  src/case_studies.py    out-of-sample hindcasts of three post-2017 disasters
   src/train.py           spatial CV, bootstrap CIs, baselines, physics, export to web/model/
   data/dataset.csv       the derived dataset (raw downloads are git-ignored)
   data/precip_30d.csv    the 30-day daily rainfall series behind each case
@@ -76,7 +86,9 @@ research/
 pip install -r research/requirements.txt
 python research/src/build_dataset.py   # ~1 h: downloads the catalog, elevation tiles, ERA5 rainfall (cached, resumable)
 python research/src/train.py           # spatial CV + exports web/model/model.json and results.json
-python research/src/make_parity.py     # reference values for web/tests.html
+python research/src/case_studies.py    # out-of-sample hindcasts (Wayanad, Petrópolis, Atami)
+python research/src/make_parity.py     # reference values for the parity tests
+node --test web/tests/parity.test.mjs  # browser code vs Python (model, slope stability)
 python -m http.server -d web 8000      # then open http://localhost:8000
 ```
 

@@ -138,7 +138,7 @@ async function analyse(lat, lon, name = null, fly = false) {
   marker = L.marker([lat, lon], { icon: L.divIcon({ className: "", html: '<div class="pulse"></div>', iconSize: [18, 18] }) }).addTo(map);
   if (fly) map.flyTo([lat, lon], 12, { duration: 1.2 });
 
-  const steps = ["Loading model", "Reading elevation tiles and computing slope", "Fetching rainfall (past 40 days + 7-day forecast)", "Scoring 14 days"];
+  const steps = ["Loading model", "Reading elevation tiles and computing slope", "Fetching rainfall (past 40 days + 7-day forecast)", "Scoring the past week and the forecast"];
   const show = (k, err) => {
     content.innerHTML = `<div class="card"><h3>Analysing ${fmt(lat, 3)}°, ${fmt(lon, 3)}°</h3><ul class="loading">${steps
       .map((s, i) => `<li class="${i < k ? "done" : i === k ? "active" : ""}">${i < k ? "✓" : i === k ? (err ? "✕" : '<span class="spinner"></span>') : "·"} ${s}</li>`)
@@ -198,7 +198,7 @@ function render() {
           <div class="sub">${summary(cur, t)}</div>
         </div>
       </div>
-      <h3 style="margin-top:14px">14-day outlook <small>click a day</small></h3>
+      <h3 style="margin-top:14px">Past week + 7-day forecast <small>click a day</small></h3>
       <div class="strip">
         ${days.map((d) => {
           const dt = new Date(d.date + "T12:00");
@@ -323,7 +323,7 @@ function fsChart(days, T) {
   const max = Math.max(2, ...days.map((d) => Math.min(d.fs, 4)));
   const y = (v) => 6 + (1 - Math.min(v, max) / max) * (H - 24);
   const pts = days.map((d, k) => `${pad + k * bw + bw / 2},${y(d.fs)}`).join(" ");
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;margin-top:8px" role="img" aria-label="Factor of safety over 14 days">
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;margin-top:8px" role="img" aria-label="Factor of safety, past week and forecast">
     <rect x="${pad}" y="${y(1)}" width="${W - pad}" height="${H - 18 - y(1)}" fill="var(--risk-3)" opacity=".1"/>
     <line x1="${pad}" x2="${W}" y1="${y(1)}" y2="${y(1)}" stroke="var(--risk-3)" stroke-dasharray="3 3"/>
     <text x="${pad - 4}" y="${y(1) + 3}" text-anchor="end" font-size="10" fill="var(--ink-3)">1.0</text>

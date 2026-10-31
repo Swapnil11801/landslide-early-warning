@@ -18,6 +18,7 @@ document.getElementById("theme").onclick = () => {
 };
 
 const R = await (await fetch("model/results.json")).json();
+const C = await (await fetch("model/case_studies.json")).json();
 const f2 = (v) => v.toFixed(2);
 const pct = (v) => `${Math.round(v * 100)}%`;
 const MAIN = "Gradient boosting (all features)";
@@ -39,7 +40,7 @@ function draw() {
     <div class="authors">Swapnil Ray · <a href="${REPO}">source code &amp; data pipeline</a></div>
     <nav class="toc">
       <a href="#s1">1 Introduction</a><a href="#s2">2 Data</a><a href="#s3">3 Method</a>
-      <a href="#s4">4 Results</a><a href="#s5">5 Limitations</a><a href="#s6">6 Future work</a><a href="#refs">References</a>
+      <a href="#s4">4 Results</a><a href="#cases">4.5 Case studies</a><a href="#s5">5 Limitations</a><a href="#s6">6 Future work</a><a href="#refs">References</a>
     </nav>
   </header>
 
@@ -59,7 +60,10 @@ function draw() {
     The most informative predictors on held-out regions were ${topImp.join(", ")}. We also tested a physically based
     infinite-slope stability model with Monte Carlo reliability analysis. Its rainfall-driven water table alone matched the
     empirical threshold (AUC ${f2(wet.roc_auc)}), but its probability of failure was barely better than chance (${f2(pfm.roc_auc)}).
-    Our diagnosis is that global elevation data underestimate slope angles and that cohesion is unknown at global scale. The model runs entirely in a web browser,
+    Our diagnosis is that global elevation data underestimate slope angles and that cohesion is unknown at global scale.
+    In hindcasts of three disasters that occurred after the training period, the event day ranked in the top
+    ${Math.ceil(100 - Math.min(...C.events.map((e) => e.event_day.p_percentile)))}% of all days at each site, but only one (${C.events.reduce((a, b) => (a.event_day.p_percentile > b.event_day.p_percentile ? a : b)).name.split(",")[0]})
+    stood out clearly; reanalysis rainfall missed the intensity of the other two storms. The model runs entirely in a web browser,
     scores any point on Earth using live rainfall forecasts and explains each prediction.
   </p></section>
 
@@ -204,6 +208,30 @@ function draw() {
   In this dataset landslides make up one third of cases by design. In the real world they are far rarer,
   so the index should be read as <i>relative</i> risk and not as a probability.</p>
 
+  <h3 id="cases">4.5 Out-of-sample case studies</h3>
+  <p>The catalogue ends in ${R.date_range[1].slice(0, 4)}, so disasters after that are a genuine out-of-sample test. For three
+  well-documented events we scored <i>every day</i> from ${C.window[0].slice(0, 4)} to ${C.window[1].slice(0, 4)}
+  (${C.events[0].days_scored.toLocaleString()} days) at the affected settlement, using ERA5 rainfall exactly as in training.
+  The question is not whether the score crossed 50% but how unusual the disaster day was at that place.
+  Because failures often happen at night after a day of rain, we use the higher of the event day and the day before.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Event</th><th class="num">Model p</th><th class="num">Percentile of all days</th><th class="num">Days/yr as high</th>
+      <th class="num">Guzzetti ratio</th><th class="num">P<sub>f</sub></th><th class="num">ERA5 rain 1 d / 3 d (mm)</th></tr></thead>
+    <tbody>${C.events.map((e) => { const d = e.event_day; return `<tr><td>${e.name}<br><span class="tiny">${e.date} · ${e.place}</span></td>
+      <td class="num">${f2(d.p)}</td><td class="num">${d.p_percentile.toFixed(d.p_percentile >= 99.5 ? 2 : 1)}</td><td class="num">${e.days_per_year_at_or_above.toFixed(1)}</td>
+      <td class="num">${d.guzzetti_ratio.toFixed(1)}×</td><td class="num">${pct(d.pf)}</td><td class="num">${Math.round(d.r1)} / ${Math.round(d.r3)}</td></tr>`; }).join("")}</tbody>
+  </table></div>
+  <figure>${C.events.map(caseSvg).join("")}
+    <figcaption>Model probability (line) and ERA5 daily rain (bars), 30 days before to 10 days after each event (dashed line).</figcaption></figure>
+  <p>The results are mixed, and the reasons are instructive. <b>Atami</b> had several days of extreme, widespread rain that ERA5
+  captured well; the event day was among the two highest-scoring days of the decade at that location and would have stood out unambiguously.
+  At <b>Wayanad</b> and <b>Petrópolis</b> the scores were elevated but not exceptional: a day at least as high occurs
+  ${C.events.filter((e) => e.event_day.p_percentile < 99).map((e) => `${Math.round(e.days_per_year_at_or_above)} times a year at ${e.place}`).join(" and ")}.
+  In both cases the trigger was intense, localised rain that a ~30 km reanalysis grid smooths away
+  (ERA5 shows only ${C.events.filter((e) => e.event_day.p_percentile < 99).map((e) => `${Math.round(e.event_day.r1)} mm on the day at ${e.place}`).join(" and ")}).
+  Rainfall input, not the terrain model, is the main bottleneck: gauge-corrected or radar rainfall would be the first upgrade.
+  Three events are anecdotes, not a validation; a systematic hindcast against a post-2017 inventory is listed as future work.</p>
+
   <h2 id="s5">5 · Limitations</h2>
   <ul>
     <li><b>Reporting bias.</b> The GLC is compiled mainly from English-language media, so it over-represents
@@ -222,7 +250,8 @@ function draw() {
 
   <h2 id="s6">6 · Future work</h2>
   <ul>
-    <li>Hindcast case studies of major disasters, such as Wayanad (India, 2024) and Petrópolis (Brazil, 2022), to measure warning lead time.</li>
+    <li>A systematic hindcast against a post-2017 landslide inventory, extending the three case studies in §4.5, and a test with gauge-corrected
+      (e.g. GPM IMERG Final, MSWEP) or radar rainfall in place of ERA5.</li>
     <li>Add soil moisture (SMAP, ERA5-Land), lithology and land-cover predictors, and quantify each one's gain.</li>
     <li>Compare with NASA LHASA, the operational global system.</li>
     <li>Run the slope-stability model with high-resolution elevation data (e.g. 1–5 m lidar) and local soil data, and back-analyse
@@ -233,7 +262,8 @@ function draw() {
 
   <h2>Reproducibility</h2>
   <p>All code, the derived dataset and figures are in the <a href="${REPO}">GitHub repository</a>. Running
-  <code>python research/src/build_dataset.py</code> and then <code>python research/src/train.py</code> regenerates every number on this page.</p>
+  <code>python research/src/build_dataset.py</code>, <code>python research/src/train.py</code> and
+  <code>python research/src/case_studies.py</code> regenerates every number on this page.</p>
   <pre class="cite">@software{slopewatch,
   title  = {SlopeWatch: explainable early warning of rainfall-triggered landslides from open global data},
   author = {Ray, Swapnil},
@@ -281,6 +311,22 @@ function resultsText() {
 }
 
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+function caseSvg(e) {
+  const W = 300, H = 130, pad = 22, s = e.series, n = s.p.length, bw = (W - pad) / n;
+  const rmax = Math.max(10, ...s.r1), iev = s.dates.indexOf(e.date);
+  const x = (i) => pad + i * bw + bw / 2;
+  return `<svg viewBox="0 0 ${W} ${H + 18}" style="width:32%;min-width:240px;display:inline-block" role="img" aria-label="${e.name}">
+    <text x="${pad}" y="11" font-size="10" fill="var(--ink-2)">${e.name.split(",")[0]} (${e.date.slice(0, 4)})</text>
+    ${s.r1.map((r, i) => `<rect x="${pad + i * bw + 0.5}" y="${H - (r / rmax) * (H - 20)}" width="${Math.max(bw - 1, 1)}" height="${(r / rmax) * (H - 20)}" fill="var(--accent)" opacity="0.45"/>`).join("")}
+    <polyline fill="none" stroke="var(--risk-3)" stroke-width="2" points="${s.p.map((p, i) => `${x(i)},${H - p * (H - 20)}`).join(" ")}"/>
+    <line x1="${x(iev)}" x2="${x(iev)}" y1="16" y2="${H}" stroke="var(--ink-2)" stroke-dasharray="3 3"/>
+    <line x1="${pad}" x2="${W}" y1="${H}" y2="${H}" stroke="var(--line)"/>
+    <text x="${pad - 3}" y="${H - (H - 20) + 4}" font-size="8" text-anchor="end" fill="var(--ink-3)">1</text>
+    <text x="${pad - 3}" y="${H}" font-size="8" text-anchor="end" fill="var(--ink-3)">0</text>
+    <text x="${pad}" y="${H + 12}" font-size="8" fill="var(--ink-3)">${s.dates[0].slice(5)}</text>
+    <text x="${W}" y="${H + 12}" font-size="8" text-anchor="end" fill="var(--ink-3)">${s.dates[n - 1].slice(5)}</text></svg>`;
+}
 
 function rocSvg() {
   const W = 420, H = 380, p = 44, s = W - p - 12;

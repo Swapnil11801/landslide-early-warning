@@ -9,16 +9,24 @@
 </head>
 <body>
   <h1>Browser ↔ Python parity</h1>
-  <p class="muted">Checks that terrain features and slope-stability results computed in this browser match the Python research code (research/src/terrain.py, slope_stability.py).</p>
+  <p class="muted">Checks that the model, terrain features and slope-stability results computed in this browser match the Python research code (research/src/train.py, terrain.py, slope_stability.py).</p>
   <div class="table-wrap"><table id="t"><thead><tr><th>Point</th><th>Feature</th><th class="num">Python</th><th class="num">Browser</th><th>Result</th></tr></thead><tbody></tbody></table></div>
   <p id="summary"></p>
   <script type="module">
     import { terrainFeatures } from "./js/terrain.js";
     import { loadStability, stability } from "./js/stability.js";
+    import { loadModel, predict } from "./js/model.js";
     const ref = await (await fetch("model/parity.json")).json();
     const tb = document.querySelector("tbody");
     let fails = 0, n = 0;
     await loadStability();
+    await loadModel();
+    for (const c of ref.model ?? []) {
+      const got = predict(c.features).p;
+      const ok = Math.abs(got - c.p) < 1e-9;
+      n++; if (!ok) fails++;
+      tb.insertAdjacentHTML("beforeend", `<tr><td>Model: case ${c.id}</td><td>p</td><td class="num">${c.p.toFixed(4)}</td><td class="num">${got.toFixed(4)}</td><td class="${ok ? "ok" : "bad"}">${ok ? "✓" : "✕"}</td></tr>`);
+    }
     for (const c of ref.stability) {
       const got = stability(c.beta, c.precip);
       for (const [k, v] of Object.entries(c.result)) {
